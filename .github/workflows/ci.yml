@@ -1,0 +1,215 @@
+name: Checks & Release
+
+# Report-only policy: no check job in this workflow may rewrite source files.
+# Every tool runs in check/no-fix mode, so the checks only emit errors and
+# never change the code.
+#
+# Checks are Go-only (no builds): gofmt (formatting), go vet (static
+# analysis) and go test (runs only tests that already exist in the repo;
+# none are added here).
+#
+# Commit message format: "<version>$<version_type>$<change_type>: <subject>"
+# e.g. "0.2.12.4$alpha$fix: a fix for something".
+# version_type: alpha | beta | release. The type is part of every release
+# artifact file name (e.g. lamp3d-cli-0.2.12.4-alpha-linux-amd64).
+# change_type:  feat | fix | docs | style | refactor | perf | test | build |
+#               ci | chore | revert.
+#
+# Skip-if-unchanged: the "changes" job maps the paths touched by a push to
+# the go area. The check job only runs when that area changed, so docs-only
+# commits skip every check. The release job reads the check results with
+# always() and fails only on failure/cancellation, never on skipped checks.
+#
+# Releases ship per-file sha256 checksums (<artifact>.sha256) next to every
+# uploaded artifact. One static binary per platform:
+#   linux (amd64, arm64), windows (amd64, arm64), macOS (amd64, arm64).
+on:
+  # Run checks on every branch's pushes and on pull requests. The build/
+  # release job additionally runs, but only on pushes to master and only
+  # after all checks passed.
+  push:
+    branches: [ "**" ]
+  pull_request:
+
+jobs:
+  # Path-to-area mapping plus the commit message guard: the filter is true
+  # when the push touched Go files, and on master pushes the commit subject
+  # is validated for the release job. Runs for every push on every branch;
+  # the check job reads the area output.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+
+      - name: Validate commit message
+        # Fast guard before any release build runs, so a bad message fails
+        # immediately without burning compute on builds that would produce
+        # broken/misnamed releases. Only relevant on master pushes; elsewhere
+        # the step is skipped.
+        id: validate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          MSG_LINE=$(echo "$COMMIT_MSG" | head -n 1 | sed 's/[[:space:]]*$//')
+          echo "Commit subject: $MSG_LINE"
+          # Expected format: "<version>$<version_type>$<change_type>(<scope>)?: <subject>"
+          # e.g. "0.2.12.4$alpha$fix: a fix for something"
+          if ! echo "$MSG_LINE" | grep -Eq '^[0-9]+(\.[0-9]+)*\$(alpha|beta|release)\$(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]*\))?: .+'; then
+            echo "::error::Invalid commit message on master. Expected format: <version>\$<version_type>\$<change_type>: <subject> (version_type: alpha|beta|release, change_type: feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
+            exit 1
+          fi
+
+  # All checks run as individual continue-on-error steps. The final step
+  # turns any failed step into a failed job, so the release job still only
+  # starts when every check passed. The job is gated on the go area from the
+  # changes job and is skipped when nothing changed.
+  go-check:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check gofmt formatting
+        id: gofmt
+        continue-on-error: true
+        # gofmt -l lists unformatted files and exits non-zero; it never
+        # rewrites files.
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::Files not gofmt-formatted:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Run go vet
+        id: vet
+        continue-on-error: true
+        run: go vet ./...
+
+      - name: Run go test
+        id: test
+        continue-on-error: true
+        # Only executes tests that already exist in the repo; this workflow
+        # adds none.
+        run: go test ./...
+
+      - name: Fail if any check failed
+        if: always()
+        env:
+          GOFMT: ${{ steps.gofmt.outcome }}
+          VET: ${{ steps.vet.outcome }}
+          TEST: ${{ steps.test.outcome }}
+        run: |
+          failed=0
+          for entry in "gofmt:$GOFMT" "vet:$VET" "test:$TEST"; do
+            name=${entry%%:*}
+            outcome=${entry#*:}
+            if [ "$outcome" != "success" ]; then
+              echo "::error::$name did not pass (outcome: $outcome)"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  # Only build and release when all checks succeeded on a push to master.
+  # always() plus an explicit failure/cancellation rejection lets skipped
+  # checks (unchanged area) pass through while failed checks still block
+  # the release.
+  release:
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    needs: [ changes, go-check ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Detect release version and type
+        id: release_type
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          # The first "$"-separated field is the version, the second the
+          # version_type; both are part of every artifact file name. alpha
+          # and beta mark the release as prerelease.
+          MSG_LINE=$(echo "$COMMIT_MSG" | head -n 1 | sed 's/[[:space:]]*$//')
+          VERSION=$(echo "$MSG_LINE" | cut -d'$' -f1)
+          VERSION_TYPE=$(echo "$MSG_LINE" | cut -d'$' -f2)
+          case "$VERSION_TYPE" in
+            alpha|beta|release) ;;
+            *)
+              echo "::error::Invalid version type: '$VERSION_TYPE' (expected alpha, beta or release)"
+              exit 1
+              ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_type=$VERSION_TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Build lamp3d-cli
+        # One cross-compiled build per platform; CGO is disabled so every
+        # target is a pure static binary. -trimpath: reproducible builds
+        # (no absolute local paths); -ldflags "-s -w": strips symbol tables
+        # for smaller binaries.
+        env:
+          CGO_ENABLED: 0
+        run: |
+          PLATFORMS="linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64"
+          for platform in $PLATFORMS; do
+            GOOS="${platform%/*}"
+            GOARCH="${platform#*/}"
+            EXT=""
+            if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+            echo "Building ${GOOS}/${GOARCH}..."
+            go build -trimpath -ldflags "-s -w" -o "lamp3d-cli-${{ steps.release_type.outputs.version }}-${{ steps.release_type.outputs.version_type }}-${GOOS}-${GOARCH}${EXT}" .
+          done
+
+      - name: Create SHA256 checksum
+        # One <artifact>.sha256 per binary; the checksum line keeps the
+        # artifact name so `sha256sum -c` works from the release download
+        # folder.
+        run: |
+          for f in lamp3d-cli-*; do
+            case "$f" in *.sha256) continue ;; esac
+            sha256sum "$f" > "$f.sha256"
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.sha }}
+          name: "${{ github.event.head_commit.message }}"
+          files: lamp3d-cli-${{ steps.release_type.outputs.version }}-${{ steps.release_type.outputs.version_type }}-*
+          draft: false
+          # Only alpha and beta releases are prereleases; release is stable.
+          prerelease: ${{ contains(fromJSON('["alpha", "beta"]'), steps.release_type.outputs.version_type) }}
