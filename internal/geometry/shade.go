@@ -10,7 +10,7 @@ import (
 	"github.com/deadsy/sdfx/sdf"
 	"github.com/deadsy/sdfx/vec/v3"
 
-	"lamp-3d/internal/design"
+	"lamp3d-cli/internal/design"
 )
 
 // deg2rad converts degrees to radians.

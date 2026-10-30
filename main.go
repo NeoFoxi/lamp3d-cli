@@ -23,7 +23,7 @@
 //	internal/export      STL writing and unique file names
 package main
 
-import "lamp-3d/internal/cli"
+import "lamp3d-cli/internal/cli"
 
 func main() {
 	cli.Run()

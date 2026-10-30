@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/term"
 
-	"lamp-3d/internal/design"
+	"lamp3d-cli/internal/design"
 )
 
 // SelectMode shows an interactive picker for the design mode. The list is

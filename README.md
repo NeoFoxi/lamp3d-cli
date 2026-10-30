@@ -1,4 +1,4 @@
-# lamp-3d
+# lamp3d-cli
 
 A generator for a 3D-printable twisted "wave lamp": a ribbed, wavy
 lampshade (printed in spiral/vase mode) and a round base that holds a round
@@ -10,7 +10,7 @@ reproducible design, with multiple visual styles to choose from.
 
 ## Requirements
 
-- Go 1.21+ (module `lamp-3d`, uses [github.com/deadsy/sdfx](https://github.com/deadsy/sdfx))
+- Go 1.21+ (module `lamp3d-cli`, uses [github.com/deadsy/sdfx](https://github.com/deadsy/sdfx))
 - A slicer for the generated STL files (e.g. Bambu Studio, OrcaSlicer)
 - Hardware: a round LED unit, Ø80 mm × 20 mm (e.g. a USB puck light)
 

@@ -3,7 +3,7 @@
 // runnable with "go run .").
 package main
 
-import "lamp-3d/internal/cli"
+import "lamp3d-cli/internal/cli"
 
 func main() {
 	cli.Run()

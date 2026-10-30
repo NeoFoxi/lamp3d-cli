@@ -14,9 +14,9 @@ import (
 	"github.com/deadsy/sdfx/sdf"
 	"github.com/deadsy/sdfx/vec/v3"
 
-	"lamp-3d/internal/design"
-	"lamp-3d/internal/export"
-	"lamp-3d/internal/geometry"
+	"lamp3d-cli/internal/design"
+	"lamp3d-cli/internal/export"
+	"lamp3d-cli/internal/geometry"
 )
 
 // buildDir is the folder where all generated STL files are placed. It is

@@ -1,8 +1,11 @@
-module lamp-3d
+module lamp3d-cli
 
 go 1.27.3
 
-require github.com/deadsy/sdfx v0.0.0-20260829173540-a63cfbad6c5a
+require (
+	github.com/deadsy/sdfx v0.0.0-20260829173540-a63cfbad6c5a
+	golang.org/x/term v0.47.0
+)
 
 require (
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
@@ -14,5 +17,4 @@ require (
 	github.com/yofu/dxf v0.0.0-20250806094206-f3988c7f0176 // indirect
 	golang.org/x/image v0.47.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/term v0.47.0 // indirect
 )
