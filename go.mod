@@ -13,4 +13,6 @@ require (
 	github.com/qmuntal/opc v0.7.12 // indirect
 	github.com/yofu/dxf v0.0.0-20250806094206-f3988c7f0176 // indirect
 	golang.org/x/image v0.47.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 )

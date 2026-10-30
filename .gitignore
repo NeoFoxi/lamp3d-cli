@@ -7,6 +7,10 @@
 *.dll
 *.so
 *.dylib
+/lamp3d-cli
+
+# Builds
+build
 
 # Test binary, built with `go test -c`
 *.test
@@ -29,5 +33,5 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/

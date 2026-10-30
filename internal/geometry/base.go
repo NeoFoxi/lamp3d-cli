@@ -1,17 +1,18 @@
-package main
+package geometry
 
 import (
 	"github.com/deadsy/sdfx/sdf"
 	"github.com/deadsy/sdfx/vec/v3"
+
+	"lamp-3d/internal/design"
 )
 
 // NewBase builds the round lamp base sized for a round LED unit
-// (puckDiameter x puckHeight). The base has:
+// (PuckDiameter x PuckHeight). The base has:
 //   - an open pocket on top that holds the LED unit (facing up),
 //   - a side slot so the USB cable can exit below the unit,
-//   - a shallow groove on top that aligns the lampshade when it is placed
-//     over the base.
-func NewBase(p *Params) (sdf.SDF3, error) {
+//   - a wide, shallow step on top that visually frames the shade.
+func NewBase(p *design.Params) (sdf.SDF3, error) {
 	// Outer body: rounded cylinder sitting on z = 0.
 	body, err := sdf.Cylinder3D(p.BaseHeight, p.BaseRadius, 2.0)
 	if err != nil {
@@ -38,22 +39,24 @@ func NewBase(p *Params) (sdf.SDF3, error) {
 	}
 	body = sdf.Difference3D(body, slot)
 
-	// Alignment groove on the top face for the shade's bottom rim.
-	grooveR := ShadeBottomMidRadius(p) + p.SeatClearance/2
-	grooveDepth := 1.2
-	groove, err := sdf.Cylinder3D(grooveDepth*2, grooveR, 0)
+	// Wide, shallow alignment step around the pocket. Its size is fixed so
+	// a single universal base fits every generated shade; the shade
+	// self-centers when placed over the LED pocket.
+	recessR := pocketR + 2
+	recessDepth := 1.2
+	recess, err := sdf.Cylinder3D(recessDepth*2, recessR, 0)
 	if err != nil {
 		return nil, err
 	}
-	groove = sdf.Transform3D(groove, sdf.Translate3d(v3.Vec{Z: p.BaseHeight - grooveDepth}))
-	body = sdf.Difference3D(body, groove)
+	recess = sdf.Transform3D(recess, sdf.Translate3d(v3.Vec{Z: p.BaseHeight - recessDepth}))
+	body = sdf.Difference3D(body, recess)
 
 	return body, nil
 }
 
 // cableSlot builds a small rectangular channel from the LED pocket floor
 // through the outer wall so the USB cable can leave the base.
-func cableSlot(p *Params, pocketR float64) (sdf.SDF3, error) {
+func cableSlot(p *design.Params, pocketR float64) (sdf.SDF3, error) {
 	// Slot cross section: CableSlotWidth wide, 4 mm high.
 	slot, err := sdf.Box3D(
 		v3.Vec{X: p.BaseRadius - pocketR + 4, Y: p.CableSlotWidth, Z: 4},
