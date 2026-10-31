@@ -191,8 +191,55 @@ jobs:
             EXT=""
             if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
             echo "Building ${GOOS}/${GOARCH}..."
+            # GOOS/GOARCH must be exported: plain shell assignments are
+            # invisible to child processes, and go build would silently fall
+            # back to the host platform while the artifact still gets the
+            # target's file name.
+            export GOOS GOARCH
             go build -trimpath -ldflags "-s -w" -o "lamp3d-cli-${{ steps.release_type.outputs.version }}-${{ steps.release_type.outputs.version_type }}-${GOOS}-${GOARCH}${EXT}" .
           done
+
+      - name: Verify artifact formats
+        # Guards against wrongly cross-compiled artifacts (e.g. a linux ELF
+        # published under a darwin name): every file is inspected with `file`
+        # and its detected binary format and CPU architecture must match the
+        # GOOS/GOARCH encoded in its file name before anything is packaged.
+        run: |
+          VERSION="${{ steps.release_type.outputs.version }}"
+          VERSION_TYPE="${{ steps.release_type.outputs.version_type }}"
+          PLATFORMS="linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64"
+          failed=0
+          for platform in $PLATFORMS; do
+            GOOS="${platform%/*}"
+            GOARCH="${platform#*/}"
+            EXT=""
+            if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+            f="lamp3d-cli-${VERSION}-${VERSION_TYPE}-${GOOS}-${GOARCH}${EXT}"
+            case "$GOOS" in
+              linux)   format='ELF' ;;
+              windows) format='PE32\+' ;;
+              darwin)  format='Mach-O' ;;
+            esac
+            case "$GOARCH" in
+              amd64) arch='x86-64|x86_64' ;;
+              arm64) arch='aarch64|ARM64|arm64' ;;
+            esac
+            if ! out=$(file "$f" 2>/dev/null); then
+              echo "::error::Missing artifact: $f"
+              failed=1
+              continue
+            fi
+            echo "$out"
+            if ! echo "$out" | grep -Eqi "$format"; then
+              echo "::error::$f: expected a $GOOS binary format, but file reports: $out"
+              failed=1
+            fi
+            if ! echo "$out" | grep -Eqi "$arch"; then
+              echo "::error::$f: expected a $GOARCH architecture, but file reports: $out"
+              failed=1
+            fi
+          done
+          exit "$failed"
 
       - name: Create SHA256 checksum
         # One <artifact>.sha256 per binary; the checksum line keeps the
