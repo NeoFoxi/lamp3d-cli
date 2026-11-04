@@ -1,5 +1,6 @@
 // Package cli contains the interactive terminal prompts of the lamp
-// generator: the design mode picker (up/down keys) and the seed prompt.
+// generator: the generator and design mode pickers (up/down keys) and the
+// seed prompt.
 package cli
 
 import (
@@ -14,26 +15,101 @@ import (
 	"golang.org/x/term"
 
 	"lamp3d-cli/internal/design"
+	"lamp3d-cli/internal/fluid"
 )
 
-// SelectMode shows an interactive picker for the design mode. The list is
-// navigated with the up/down arrow keys and confirmed with enter; 'q' or
-// Ctrl+C quits the program. When stdin is not a terminal (e.g. piped input)
-// ModeAny is returned directly.
+// generatorOptions are the entries of the generator picker and the
+// generator names they resolve to.
+var generatorOptions = []struct{ label, name string }{
+	{"any (random)", "any"},
+	{"classic (wave lamp)", "classic"},
+	{"fluid (flowing patterns)", "fluid"},
+}
+
+// SelectGenerator shows an interactive picker for the lamp generator. The
+// list is navigated with the up/down arrow keys and confirmed with enter;
+// 'q' or Ctrl+C quits the program. When stdin is not a terminal (e.g. piped
+// input) "any" is returned directly.
+func SelectGenerator() string {
+	options := make([]string, len(generatorOptions))
+	for i, o := range generatorOptions {
+		options[i] = o.label
+	}
+	idx := selectOption("Select the generator (up/down, enter to confirm):", options)
+	return generatorOptions[idx].name
+}
+
+// classicModeHints are the short explanations shown in parentheses next to
+// each classic mode in the picker.
+var classicModeHints = map[design.DesignMode]string{
+	design.ModeAny:    "random pick",
+	design.ModeWave:   "fine spiral ribs",
+	design.ModeFluted: "deep twisted flutes",
+	design.ModeSpiral: "bold helical ribs",
+	design.ModeRipple: "horizontal rings",
+	design.ModeDune:   "wavy vertical lobes",
+}
+
+// fluidModeHints are the short explanations shown in parentheses next to
+// each fluid mode in the picker.
+var fluidModeHints = map[design.DesignMode]string{
+	design.ModeAny:   "random pick",
+	fluid.ModeFlow:   "drifting harmonics",
+	fluid.ModeBloom:  "breathing petals",
+	fluid.ModeVortex: "slow swirl + ring",
+	fluid.ModeWeave:  "flowing moiré",
+	fluid.ModeRipple: "smooth helical rings",
+}
+
+// SelectMode shows an interactive picker for the classic design mode. The
+// list is navigated with the up/down arrow keys and confirmed with enter;
+// 'q' or Ctrl+C quits the program. When stdin is not a terminal (e.g. piped
+// input) ModeAny is returned directly.
 func SelectMode() design.DesignMode {
+	modes := append([]design.DesignMode{design.ModeAny}, design.Modes()...)
+	return modes[selectOption("Select the design mode (up/down, enter to confirm):", modeLabels(modes, classicModeHints))]
+}
+
+// SelectFluidMode shows an interactive picker for the fluid design modes.
+// It behaves exactly like SelectMode but lists the fluid generator's
+// styles.
+func SelectFluidMode() design.DesignMode {
+	modes := append([]design.DesignMode{design.ModeAny}, fluid.Modes()...)
+	return modes[selectOption("Select the fluid design mode (up/down, enter to confirm):", modeLabels(modes, fluidModeHints))]
+}
+
+// modeLabels converts design modes into the strings shown in the picker:
+// the mode name followed by a short explanation in parentheses.
+func modeLabels(modes []design.DesignMode, hints map[design.DesignMode]string) []string {
+	labels := make([]string, len(modes))
+	for i, m := range modes {
+		if hint, ok := hints[m]; ok {
+			labels[i] = fmt.Sprintf("%s (%s)", m, hint)
+		} else {
+			labels[i] = string(m)
+		}
+	}
+	return labels
+}
+
+// selectOption shows a generic interactive list picker and returns the
+// index of the chosen entry. The list is navigated with the up/down arrow
+// keys and confirmed with enter; 'q' quits by accepting the first entry and
+// Ctrl+C aborts the program. When stdin is not a terminal (e.g. piped
+// input) index 0 is returned directly.
+func selectOption(title string, options []string) int {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return design.ModeAny
+		return 0
 	}
 
-	modes := append([]design.DesignMode{design.ModeAny}, design.Modes()...)
 	idx := 0
 
 	// Switch the terminal to raw mode so single key presses arrive
 	// immediately, and restore it on the way out.
 	old, err := term.MakeRaw(fd)
 	if err != nil {
-		return design.ModeAny
+		return 0
 	}
 	defer term.Restore(fd, old)
 
@@ -52,15 +128,15 @@ func SelectMode() design.DesignMode {
 		if !first {
 			// Move the cursor back up to the header line: one line per
 			// menu entry plus the header itself.
-			fmt.Printf("\x1b[%dA\r", len(modes)+1)
+			fmt.Printf("\x1b[%dA\r", len(options)+1)
 		}
 		first = false
-		fmt.Printf("Select the design mode (up/down, enter to confirm):\r\n")
-		for i, m := range modes {
+		fmt.Printf("%s\r\n", title)
+		for i, o := range options {
 			if i == idx {
-				fmt.Printf("  \x1b[7m%s\x1b[0m\x1b[K\r\n", m)
+				fmt.Printf("  \x1b[7m%s\x1b[0m\x1b[K\r\n", o)
 			} else {
-				fmt.Printf("    %s\x1b[K\r\n", m)
+				fmt.Printf("    %s\x1b[K\r\n", o)
 			}
 		}
 	}
@@ -72,24 +148,24 @@ func SelectMode() design.DesignMode {
 	var b [1]byte
 	for {
 		if _, err := os.Stdin.Read(b[:]); err != nil || b[0] == 4 {
-			return design.ModeAny
+			return 0
 		}
 		switch b[0] {
 		case 3: // Ctrl+C
 			abort()
 		case '\r', '\n':
-			return modes[idx]
+			return idx
 		case 'q', 'Q':
-			return design.ModeAny
+			return 0
 		case 27: // escape sequence (e.g. arrow keys)
 			if _, err := os.Stdin.Read(b[:]); err != nil {
-				return design.ModeAny
+				return 0
 			}
 			if b[0] != '[' && b[0] != 'O' {
 				continue // unknown sequence, ignore
 			}
 			if _, err := os.Stdin.Read(b[:]); err != nil {
-				return design.ModeAny
+				return 0
 			}
 			switch b[0] {
 			case 'A': // up
@@ -98,7 +174,7 @@ func SelectMode() design.DesignMode {
 					draw()
 				}
 			case 'B': // down
-				if idx < len(modes)-1 {
+				if idx < len(options)-1 {
 					idx++
 					draw()
 				}
